@@ -1,12 +1,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-<!-- Permisos de Ubicación y SMS -->
+<!-- Permisos de Ubicación GPS -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    
+    <!-- Permisos de Comunicación (SMS y Llamadas directas al 911) -->
     <uses-permission android:name="android.permission.SEND_SMS" />
-    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- Necesario en Android 11+ para poder abrir WhatsApp vía url_launcher -->
+    <!-- Permitir a la app verificar y abrir WhatsApp sin ser bloqueada -->
     <queries>
         <package android:name="com.whatsapp" />
         <package android:name="com.whatsapp.w4b" />
