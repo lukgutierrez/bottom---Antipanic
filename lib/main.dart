@@ -45,6 +45,8 @@ class _PanicHomeScreenState extends State<PanicHomeScreen> {
   
   List<String> _contactos = [];
   bool _enviando = false;
+  bool _alarmaSonando = false;
+  final _nombreController = TextEditingController();
   final _numeroController = TextEditingController();
 
   @override
@@ -80,12 +82,16 @@ class _PanicHomeScreenState extends State<PanicHomeScreen> {
     }
   }
 
-  // --- AGREGAR INTELIGENTE (AUTOMATIZA EL FORMATO +549) ---
+  // AGREGAR CON NOMBRE Y NÚMERO (Ejemplo de guardado: "Mamá - +549387...")
   void _agregarContacto(Function setDialogState) {
+    String nombre = _nombreController.text.trim();
     String numero = _numeroController.text.trim();
-    if (numero.isEmpty) return;
+
+    if (nombre.isEmpty || numero.isEmpty) {
+      _mostrarSnack("⚠️ Por favor ingresa el Nombre y el Número", isError: true);
+      return;
+    }
     
-    // Si el usuario escribió un número de Argentina sin el +549 (ej: 387... o 0387...), se lo agregamos
     if (!numero.startsWith("+")) {
       if (numero.startsWith("0")) {
         numero = "+549${numero.substring(1)}";
@@ -103,12 +109,15 @@ class _PanicHomeScreenState extends State<PanicHomeScreen> {
       return;
     }
     
-    List<String> actualizada = List.from(_contactos)..add(numero);
+    String contactoCompleto = "$nombre - $numero";
+    List<String> actualizada = List.from(_contactos)..add(contactoCompleto);
+    
     _guardarContactosNativos(actualizada);
+    _nombreController.clear();
     _numeroController.clear();
     setDialogState(() {});
     setState(() {});
-    _mostrarSnack("✅ Contacto guardado: $numero");
+    _mostrarSnack("✅ Guardado: $contactoCompleto");
   }
 
   void _eliminarContacto(int index, Function setDialogState) {
@@ -117,6 +126,21 @@ class _PanicHomeScreenState extends State<PanicHomeScreen> {
     setDialogState(() {});
     setState(() {});
     _mostrarSnack("🗑️ Contacto eliminado.");
+  }
+
+  // Extrae solo los números para que el SMS o WhatsApp puedan enviarse sin error
+  String _extraerNumero(String contactoGuardado) {
+    if (contactoGuardado.contains(" - ")) {
+      return contactoGuardado.split(" - ").last.trim();
+    }
+    return contactoGuardado.trim();
+  }
+
+  String _extraerNombre(String contactoGuardado) {
+    if (contactoGuardado.contains(" - ")) {
+      return contactoGuardado.split(" - ").first.trim();
+    }
+    return "Contacto de Emergencia";
   }
 
   Future<Position?> _obtenerUbicacionSegura() async {
@@ -166,15 +190,16 @@ class _PanicHomeScreenState extends State<PanicHomeScreen> {
     String mensajeAlerta = "¡ALERTA DE EMERGENCIA! Necesito ayuda urgente. Mi ubicación actual: $linkMaps";
 
     int enviados = 0;
-    for (String numero in _contactos) {
+    for (String item in _contactos) {
+      String numeroLimpio = _extraerNumero(item);
       try {
         final bool exito = await platform.invokeMethod('sendBackgroundSms', {
-          'phone': numero,
+          'phone': numeroLimpio,
           'message': mensajeAlerta,
         });
         if (exito) enviados++;
       } catch (e) {
-        debugPrint("Fallo al enviar a $numero: $e");
+        debugPrint("Fallo al enviar a $numeroLimpio: $e");
       }
     }
 
@@ -195,23 +220,98 @@ class _PanicHomeScreenState extends State<PanicHomeScreen> {
     }
   }
 
-  Future<void> _enviarPorWhatsApp() async {
-    if (_contactos.isEmpty) {
-      _mostrarSnack("⚠️ Configura un contacto primero.", isError: true);
-      _abrirGestorContactosCentro();
-      return;
+  void _alternarAlarma() async {
+    try {
+      if (_alarmaSonando) {
+        await platform.invokeMethod('detenerAlarma');
+        setState(() => _alarmaSonando = false);
+        _mostrarSnack("🔇 Sirena silenciada.");
+      } else {
+        await platform.invokeMethod('iniciarAlarma');
+        setState(() => _alarmaSonando = true);
+        _mostrarSnack("🚨 SIRENA DE EMERGENCIA AL MÁXIMO VOLUMEN");
+      }
+    } catch (e) {
+      _mostrarSnack("Error en sirena: $e", isError: true);
     }
+  }
 
+  Future<void> _enviarPorWhatsAppA(String itemContacto) async {
     Position? posicion = await _obtenerUbicacionSegura();
     if (posicion == null) return;
 
     String linkMaps = "https://maps.google.com/?q=${posicion.latitude},${posicion.longitude}";
     String mensajeAlerta = "¡ALERTA DE EMERGENCIA! Necesito ayuda urgente. Mi ubicación actual: $linkMaps";
 
-    String numeroLimpio = _contactos.first.replaceAll(RegExp(r'[^0-9]'), '');
+    String numero = _extraerNumero(itemContacto);
+    String numeroLimpio = numero.replaceAll(RegExp(r'[^0-9]'), '');
     String urlCompleta = "https://wa.me/$numeroLimpio?text=${Uri.encodeComponent(mensajeAlerta)}";
 
     await platform.invokeMethod('abrirEnlace', {'url': urlCompleta});
+  }
+
+  void _mostrarSelectorWhatsApp() {
+    if (_contactos.isEmpty) {
+      _mostrarSnack("⚠️ Configura un contacto primero.", isError: true);
+      _abrirGestorContactosCentro();
+      return;
+    }
+
+    if (_contactos.length == 1) {
+      _enviarPorWhatsAppA(_contactos.first);
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E1E),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.send, color: Color(0xFF128C7E), size: 24),
+                SizedBox(width: 10),
+                Text("Enviar ubicación por WhatsApp", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+              ],
+            ),
+            const SizedBox(height: 6),
+            const Text("Elige el contacto al que deseas avisar en este momento:", style: TextStyle(color: Colors.grey, fontSize: 13)),
+            const SizedBox(height: 16),
+            ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _contactos.length,
+              itemBuilder: (ctx, i) {
+                String nombre = _extraerNombre(_contactos[i]);
+                String numero = _extraerNumero(_contactos[i]);
+                return Card(
+                  color: const Color(0xFF2C2C2C),
+                  margin: const EdgeInsets.only(bottom: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    leading: const CircleAvatar(backgroundColor: Color(0xFF128C7E), child: Icon(Icons.person, color: Colors.white)),
+                    title: Text(nombre, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                    subtitle: Text(numero, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                    trailing: const Icon(Icons.arrow_forward_ios, color: Colors.white54, size: 16),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _enviarPorWhatsAppA(_contactos[i]);
+                    },
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 10),
+          ],
+        ),
+      ),
+    );
   }
 
   void _mostrarAlertaFalloSaldo() {
@@ -235,23 +335,22 @@ class _PanicHomeScreenState extends State<PanicHomeScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("CANCELAR", style: TextStyle(color: Colors.grey))),
           ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.green[600]),
-            onPressed: () { Navigator.pop(ctx); _enviarPorWhatsApp(); },
-            icon: const Icon(Icons.send, color: Colors.white, size: 16),
-            label: const Text("WhatsApp", style: TextStyle(color: Colors.white)),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange[800]),
+            onPressed: () { Navigator.pop(ctx); _alternarAlarma(); },
+            icon: const Icon(Icons.volume_up, color: Colors.white, size: 16),
+            label: const Text("Sirena", style: TextStyle(color: Colors.white)),
           ),
           ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red[700]),
-            onPressed: () { Navigator.pop(ctx); _llamar911(); },
-            icon: const Icon(Icons.phone, color: Colors.white, size: 16),
-            label: const Text("Llamar 911", style: TextStyle(color: Colors.white)),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF128C7E)),
+            onPressed: () { Navigator.pop(ctx); _mostrarSelectorWhatsApp(); },
+            icon: const Icon(Icons.send, color: Colors.white, size: 16),
+            label: const Text("WhatsApp", style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
     );
   }
 
-  // --- NUEVA INTERFAZ: VENTANA FLOTANTE EN EL CENTRO ---
   void _abrirGestorContactosCentro() {
     showDialog(
       context: context,
@@ -263,96 +362,120 @@ class _PanicHomeScreenState extends State<PanicHomeScreen> {
             insetPadding: const EdgeInsets.all(20),
             child: Padding(
               padding: const EdgeInsets.all(24.0),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text("Mis Contactos (Máx. 3)", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
-                      IconButton(
-                        icon: const Icon(Icons.close, color: Colors.grey),
-                        onPressed: () => Navigator.pop(ctx),
-                      )
-                    ],
-                  ),
-                  const SizedBox(height: 5),
-                  const Text("Escribe tu número normal (Ej: 387... o 0387...). La app le pondrá el +549 sola.", style: TextStyle(color: Colors.grey, fontSize: 12)),
-                  const SizedBox(height: 20),
-
-                  // LISTA DE NÚMEROS GUARDADOS
-                  _contactos.isEmpty
-                      ? Container(
-                          padding: const EdgeInsets.all(20),
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(12)),
-                          child: const Text("No hay contactos aún.\nAgrega el primero abajo 👇", textAlign: TextAlign.center, style: TextStyle(color: Colors.white54)),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text("Mis Contactos (Máx. 3)", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.grey),
+                          onPressed: () => Navigator.pop(ctx),
                         )
-                      : ListView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: _contactos.length,
-                          itemBuilder: (ctx, i) => Container(
-                            margin: const EdgeInsets.only(bottom: 10),
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            decoration: BoxDecoration(color: const Color(0xFF2C2C2C), borderRadius: BorderRadius.circular(12)),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Row(
+                      ],
+                    ),
+                    const SizedBox(height: 5),
+                    const Text("Agrega el nombre y el número de tu contacto de confianza.", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    const SizedBox(height: 20),
+
+                    _contactos.isEmpty
+                        ? Container(
+                            padding: const EdgeInsets.all(20),
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(12)),
+                            child: const Text("No hay contactos aún.\nAgrega el primero abajo 👇", textAlign: TextAlign.center, style: TextStyle(color: Colors.white54)),
+                          )
+                        : ListView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: _contactos.length,
+                            itemBuilder: (ctx, i) {
+                              String nombre = _extraerNombre(_contactos[i]);
+                              String numero = _extraerNumero(_contactos[i]);
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 10),
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                decoration: BoxDecoration(color: const Color(0xFF2C2C2C), borderRadius: BorderRadius.circular(12)),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                    const CircleAvatar(backgroundColor: Colors.green, radius: 16, child: Icon(Icons.check, color: Colors.white, size: 18)),
-                                    const SizedBox(width: 12),
-                                    Text(_contactos[i], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white)),
+                                    Row(
+                                      children: [
+                                        const CircleAvatar(backgroundColor: Colors.green, radius: 18, child: Icon(Icons.person, color: Colors.white, size: 20)),
+                                        const SizedBox(width: 12),
+                                        Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(nombre, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white)),
+                                            Text(numero, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(Icons.delete, color: Colors.redAccent),
+                                      tooltip: "Eliminar",
+                                      onPressed: () => _eliminarContacto(i, setDialogState),
+                                    ),
                                   ],
                                 ),
-                                IconButton(
-                                  icon: const Icon(Icons.delete, color: Colors.redAccent),
-                                  tooltip: "Eliminar",
-                                  onPressed: () => _eliminarContacto(i, setDialogState),
-                                ),
-                              ],
-                            ),
+                              );
+                            },
                           ),
-                        ),
 
-                  const SizedBox(height: 20),
+                    const SizedBox(height: 20),
 
-                  // CAMPO DE TEXTO Y BOTÓN DE AGREGAR
-                  if (_contactos.length < 3) ...[
-                    TextField(
-                      controller: _numeroController,
-                      keyboardType: TextInputType.phone,
-                      style: const TextStyle(color: Colors.white, fontSize: 16),
-                      decoration: InputDecoration(
-                        hintText: "Ej: 387696...",
-                        hintStyle: const TextStyle(color: Colors.white30),
-                        filled: true,
-                        fillColor: const Color(0xFF2C2C2C),
-                        prefixIcon: const Icon(Icons.phone, color: Colors.white54),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blueAccent,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    if (_contactos.length < 3) ...[
+                      TextField(
+                        controller: _nombreController,
+                        style: const TextStyle(color: Colors.white, fontSize: 15),
+                        textCapitalization: TextCapitalization.words,
+                        decoration: InputDecoration(
+                          hintText: "Nombre (Ej: Mamá, Hermano)",
+                          hintStyle: const TextStyle(color: Colors.white30),
+                          filled: true,
+                          fillColor: const Color(0xFF2C2C2C),
+                          prefixIcon: const Icon(Icons.person_outline, color: Colors.white54),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                         ),
-                        onPressed: () => _agregarContacto(setDialogState),
-                        icon: const Icon(Icons.add, color: Colors.white),
-                        label: const Text("AGREGAR CONTACTO", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
                       ),
-                    ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _numeroController,
+                        keyboardType: TextInputType.phone,
+                        style: const TextStyle(color: Colors.white, fontSize: 15),
+                        decoration: InputDecoration(
+                          hintText: "Número (Ej: 387696...)",
+                          hintStyle: const TextStyle(color: Colors.white30),
+                          filled: true,
+                          fillColor: const Color(0xFF2C2C2C),
+                          prefixIcon: const Icon(Icons.phone, color: Colors.white54),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blueAccent,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          onPressed: () => _agregarContacto(setDialogState),
+                          icon: const Icon(Icons.add, color: Colors.white),
+                          label: const Text("AGREGAR CONTACTO", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 10),
                   ],
-
-                  const SizedBox(height: 10),
-                ],
+                ),
               ),
             ),
           );
@@ -372,153 +495,354 @@ class _PanicHomeScreenState extends State<PanicHomeScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text("BOTÓN ANTIPÁNICO", style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+@override
+Widget build(BuildContext context) {
+  final Color colorFondo = _alarmaSonando
+      ? Colors.red[900]!.withOpacity(0.35)
+      : const Color(0xFF121212);
+
+  return Scaffold(
+    backgroundColor: colorFondo,
+    appBar: AppBar(
+      title: const Text(
+        "BOTÓN ANTIPÁNICO",
+        style: TextStyle(
+          fontWeight: FontWeight.bold,
+          letterSpacing: 1.5,
+        ),
       ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // BARRA SUPERIOR PARA GESTIONAR CONTACTOS
-            GestureDetector(
-              onTap: _abrirGestorContactosCentro,
-              child: Container(
-                margin: const EdgeInsets.all(16),
-                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                decoration: BoxDecoration(
-                  color: _contactos.isEmpty ? Colors.orange[900] : const Color(0xFF252525),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: _contactos.isEmpty ? Colors.orange : Colors.white12),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(_contactos.isEmpty ? Icons.warning : Icons.group, color: Colors.white, size: 24),
-                        const SizedBox(width: 14),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              _contactos.isEmpty ? "⚠️ FALTA AGREGAR CONTACTOS" : "CONTACTOS GUARDADOS (${_contactos.length}/3)",
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
-                            ),
-                            const Text("Toca aquí para ver, agregar o eliminar", style: TextStyle(color: Colors.white70, fontSize: 12)),
-                          ],
-                        ),
-                      ],
-                    ),
-                    const Icon(Icons.edit, size: 20, color: Colors.blueAccent),
-                  ],
+      backgroundColor:
+          _alarmaSonando ? Colors.red[900] : const Color(0xFF1E1E1E),
+    ),
+    body: SafeArea(
+      child: Column(
+        children: [
+          // BARRA SUPERIOR PARA GESTIONAR CONTACTOS
+          GestureDetector(
+            onTap: _abrirGestorContactosCentro,
+            child: Container(
+              margin: const EdgeInsets.all(16),
+              padding: const EdgeInsets.symmetric(
+                vertical: 14,
+                horizontal: 16,
+              ),
+              decoration: BoxDecoration(
+                color: _contactos.isEmpty
+                    ? Colors.orange[900]
+                    : const Color(0xFF252525),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: _contactos.isEmpty
+                      ? Colors.orange
+                      : Colors.white12,
                 ),
               ),
-            ),
-
-            Expanded(
-              child: Center(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(24.0),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
                     children: [
-                      const Text(
-                        "MANTÉN PRESIONADO PARA ENVIAR ALERTA",
-                        style: TextStyle(color: Colors.grey, fontSize: 13, letterSpacing: 1.2, fontWeight: FontWeight.bold),
+                      Icon(
+                        _contactos.isEmpty
+                            ? Icons.warning
+                            : Icons.group,
+                        color: Colors.white,
+                        size: 24,
                       ),
-                      const SizedBox(height: 25),
-
-                      // BOTÓN SOS ANIMADO
-                      GestureDetector(
-                        onLongPress: _enviando ? null : _activarAlertaSms,
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 300),
-                          width: 220, height: 220,
-                          decoration: BoxDecoration(
-                            color: _enviando ? Colors.grey[800] : Colors.red[600],
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: (_enviando ? Colors.grey : Colors.red).withOpacity(0.4),
-                                blurRadius: 30, spreadRadius: 8,
-                              )
-                            ],
-                            border: Border.all(color: Colors.white24, width: 4),
-                          ),
-                          child: Center(
-                            child: _enviando
-                                ? const CircularProgressIndicator(color: Colors.white, strokeWidth: 4)
-                                : const Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(Icons.touch_app_rounded, color: Colors.white, size: 50),
-                                      SizedBox(height: 10),
-                                      Text("SOS", style: TextStyle(color: Colors.white, fontSize: 42, fontWeight: FontWeight.w900, letterSpacing: 2)),
-                                      Text("2 SEGUNDOS", style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w600)),
-                                    ],
-                                  ),
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(height: 40),
-                      const Divider(color: Colors.white12),
-                      const SizedBox(height: 20),
-
-                      const Text("ACCIONES RÁPIDAS DE EMERGENCIA", style: TextStyle(color: Colors.grey, fontSize: 12)),
-                      const SizedBox(height: 15),
-
-                      // BOTONES 911 Y WHATSAPP
-                      Row(
+                      const SizedBox(width: 14),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.red[900],
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 16),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                              onPressed: _llamar911,
-                              icon: const Icon(Icons.call, size: 22),
-                              label: const Text("LLAMAR 911", style: TextStyle(fontWeight: FontWeight.bold)),
+                          Text(
+                            _contactos.isEmpty
+                                ? "⚠️ FALTA AGREGAR CONTACTOS"
+                                : "CONTACTOS GUARDADOS (${_contactos.length}/3)",
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              color: Colors.white,
                             ),
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF128C7E),
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 16),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                              onPressed: _enviarPorWhatsApp,
-                              icon: const Icon(Icons.send, size: 22),
-                              label: const Text("WHATSAPP", style: TextStyle(fontWeight: FontWeight.bold)),
+                          const Text(
+                            "Toca aquí para ver, agregar o eliminar",
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
                             ),
                           ),
                         ],
                       ),
                     ],
                   ),
+                  const Icon(
+                    Icons.edit,
+                    size: 20,
+                    color: Colors.blueAccent,
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // CUERPO CENTRAL
+          Expanded(
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      _alarmaSonando
+                          ? "🚨 ¡SIRENA ACTIVADA! TOCA EL BOTÓN PARA APAGAR 🚨"
+                          : "MANTÉN PRESIONADO PARA ENVIAR ALERTA",
+                      style: TextStyle(
+                        color: _alarmaSonando
+                            ? Colors.redAccent
+                            : Colors.grey,
+                        fontSize: 13,
+                        letterSpacing: 1.2,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 25),
+
+                    // BOTÓN SOS
+                    GestureDetector(
+                      onLongPress:
+                          _enviando ? null : _activarAlertaSms,
+                      onTap:
+                          _alarmaSonando ? _alternarAlarma : null,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
+                        width: 230,
+                        height: 230,
+                        decoration: BoxDecoration(
+                          color: _alarmaSonando
+                              ? Colors.orange[700]
+                              : (_enviando
+                                  ? Colors.grey[800]
+                                  : Colors.red[600]),
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: (_alarmaSonando
+                                      ? Colors.orange
+                                      : (_enviando
+                                          ? Colors.grey
+                                          : Colors.red))
+                                  .withOpacity(0.5),
+                              blurRadius:
+                                  _alarmaSonando ? 50 : 30,
+                              spreadRadius:
+                                  _alarmaSonando ? 15 : 8,
+                            ),
+                          ],
+                          border: Border.all(
+                            color: Colors.white24,
+                            width: 4,
+                          ),
+                        ),
+                        child: Center(
+                          child: _enviando
+                              ? const CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 4,
+                                )
+                              : Column(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      _alarmaSonando
+                                          ? Icons.volume_off
+                                          : Icons.touch_app_rounded,
+                                      color: Colors.white,
+                                      size: 55,
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      _alarmaSonando
+                                          ? "APAGAR"
+                                          : "SOS",
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 38,
+                                        fontWeight:
+                                            FontWeight.w900,
+                                        letterSpacing: 2,
+                                      ),
+                                    ),
+                                    Text(
+                                      _alarmaSonando
+                                          ? "TOCA UNA VEZ"
+                                          : "2 SEGUNDOS",
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 12,
+                                        fontWeight:
+                                            FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 35),
+                    const Divider(color: Colors.white12),
+                    const SizedBox(height: 15),
+
+                    const Text(
+                      "ACCIONES RÁPIDAS DE EMERGENCIA",
+                      style: TextStyle(
+                        color: Colors.grey,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 15),
+
+                    // BOTONES INFERIORES
+                    Row(
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor:
+                                  Colors.red[900],
+                              foregroundColor:
+                                  Colors.white,
+                              padding:
+                                  const EdgeInsets.symmetric(
+                                vertical: 14,
+                              ),
+                              shape:
+                                  RoundedRectangleBorder(
+                                borderRadius:
+                                    BorderRadius.circular(
+                                  12,
+                                ),
+                              ),
+                            ),
+                            onPressed: _llamar911,
+                            icon: const Icon(
+                              Icons.call,
+                              size: 18,
+                            ),
+                            label: const Text(
+                              "911",
+                              style: TextStyle(
+                                fontWeight:
+                                    FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          flex: 4,
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor:
+                                  const Color(0xFF128C7E),
+                              foregroundColor:
+                                  Colors.white,
+                              padding:
+                                  const EdgeInsets.symmetric(
+                                vertical: 14,
+                              ),
+                              shape:
+                                  RoundedRectangleBorder(
+                                borderRadius:
+                                    BorderRadius.circular(
+                                  12,
+                                ),
+                              ),
+                            ),
+                            onPressed:
+                                _mostrarSelectorWhatsApp,
+                            icon: const Icon(
+                              Icons.send,
+                              size: 18,
+                            ),
+                            label: const Text(
+                              "WHATSAPP",
+                              style: TextStyle(
+                                fontWeight:
+                                    FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          flex: 3,
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor:
+                                  _alarmaSonando
+                                      ? Colors.redAccent
+                                      : Colors.orange[800],
+                              foregroundColor:
+                                  Colors.white,
+                              padding:
+                                  const EdgeInsets.symmetric(
+                                vertical: 14,
+                              ),
+                              shape:
+                                  RoundedRectangleBorder(
+                                borderRadius:
+                                    BorderRadius.circular(
+                                  12,
+                                ),
+                              ),
+                            ),
+                            onPressed: _alternarAlarma,
+                            icon: Icon(
+                              _alarmaSonando
+                                  ? Icons.volume_off
+                                  : Icons.volume_up,
+                              size: 18,
+                            ),
+                            label: Text(
+                              _alarmaSonando
+                                  ? "PARAR"
+                                  : "SIRENA",
+                              style: const TextStyle(
+                                fontWeight:
+                                    FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ),
+          ),
 
-            // MARCA DE AGUA
-            Padding(
-              padding: const EdgeInsets.only(bottom: 16.0, top: 8.0),
-              child: Text(
-                "Created by @lukgtz",
-                style: TextStyle(color: Colors.grey[700], fontSize: 13, fontWeight: FontWeight.w600, letterSpacing: 1.0),
+          // MARCA DE AGUA
+          Padding(
+            padding: const EdgeInsets.only(
+              bottom: 16,
+              top: 8,
+            ),
+            child: Text(
+              "Created by @lukgtz",
+              style: TextStyle(
+                color: Colors.grey[700],
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 1.0,
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
-    );
-  }
-}
+    ),
+  );
+}}

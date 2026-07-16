@@ -2,7 +2,14 @@ package com.example.app_tes
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
+import android.media.MediaPlayer
+import android.media.RingtoneManager
 import android.net.Uri
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.telephony.SmsManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -10,6 +17,8 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity: FlutterActivity() {
     private val CHANNEL = "com.panico.app/canales"
+    private var mediaPlayer: MediaPlayer? = null
+    private var vibrator: Vibrator? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -45,7 +54,7 @@ class MainActivity: FlutterActivity() {
                 }
             } 
             
-            // 2. LLAMADA DIRECTA (911)
+            // 2. LLAMADA DIRECTA AL 911
             else if (call.method == "llamarEmergencia") {
                 val numero = call.argument<String>("numero") ?: "911"
                 try {
@@ -76,7 +85,7 @@ class MainActivity: FlutterActivity() {
                 }
             } 
             
-            // 4. GUARDADO NATIVO ULTRA SEGURO (Usando separador ||)
+            // 4. GUARDADO NATIVO ULTRA SEGURO (Ahora guarda Nombre y Número)
             else if (call.method == "guardarContactos") {
                 val lista = call.argument<List<String>>("contactos")
                 if (lista != null) {
@@ -95,6 +104,76 @@ class MainActivity: FlutterActivity() {
                 val guardado = prefs.getString("mis_numeros", "") ?: ""
                 val lista = if (guardado.isEmpty()) emptyList<String>() else guardado.split("||")
                 result.success(lista)
+            }
+
+            // 6. INICIAR SIRENA Y VIBRACIÓN (MEJORADO PARA QUE SUENE SÍ O SÍ)
+            else if (call.method == "iniciarAlarma") {
+                try {
+                    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                    
+                    // Forzamos al máximo el volumen de Alarma y de Multimedia
+                    val maxAlarm = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+                    val maxMusic = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                    audioManager.setStreamVolume(AudioManager.STREAM_ALARM, maxAlarm, 0)
+                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxMusic, 0)
+
+                    // Buscamos el tono más fuerte disponible (Alarma -> Tono de llamada -> Notificación)
+                    if (mediaPlayer == null) {
+                        var alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                        if (alarmUri == null) {
+                            alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+                        }
+                        if (alarmUri == null) {
+                            alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                        }
+
+                        mediaPlayer = MediaPlayer().apply {
+                            setDataSource(context, alarmUri!!)
+                            setAudioStreamType(AudioManager.STREAM_ALARM)
+                            isLooping = true
+                            prepare()
+                            start()
+                        }
+                    } else if (mediaPlayer?.isPlaying == false) {
+                        mediaPlayer?.start()
+                    }
+
+                    // Motor de vibración continuo estilo pánico
+                    vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                        vibratorManager.defaultVibrator
+                    } else {
+                        @Suppress("DEPRECATION")
+                        context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+                    }
+
+                    val pattern = longArrayOf(0, 400, 200, 400, 200)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        vibrator?.vibrate(VibrationEffect.createWaveform(pattern, 0))
+                    } else {
+                        @Suppress("DEPRECATION")
+                        vibrator?.vibrate(pattern, 0)
+                    }
+
+                    result.success(true)
+                } catch (e: Exception) {
+                    result.error("ERROR_ALARMA", e.message, null)
+                }
+            }
+
+            // 7. DETENER SIRENA Y VIBRACIÓN
+            else if (call.method == "detenerAlarma") {
+                try {
+                    mediaPlayer?.apply {
+                        if (isPlaying) stop()
+                        release()
+                    }
+                    mediaPlayer = null
+                    vibrator?.cancel()
+                    result.success(true)
+                } catch (e: Exception) {
+                    result.error("ERROR_DETENER", e.message, null)
+                }
             }
             
             else {
