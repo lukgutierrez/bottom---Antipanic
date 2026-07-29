@@ -96,6 +96,29 @@ class PanicService {
     await _channel.invokeMethod('detenerAlarma');
   }
 
+  // ─── Mensaje personalizado ──────────────────────────────────
+  Future<String> loadCustomMessage() async {
+    try {
+      final msg = await _channel.invokeMethod<String>('cargarMensaje');
+      return msg ?? '';
+    } catch (e) {
+      debugPrint("Error al cargar mensaje: $e");
+      return '';
+    }
+  }
+
+  Future<void> saveCustomMessage(String message) async {
+    try {
+      await _channel.invokeMethod('guardarMensaje', {'mensaje': message});
+    } catch (e) {
+      debugPrint("Error al guardar mensaje: $e");
+    }
+  }
+
+  String buildFinalMessage(String template, String locationUrl) {
+    return template.replaceAll(AppConstants.locationPlaceholder, locationUrl);
+  }
+
   // ─── WhatsApp ────────────────────────────────────────────────
   Future<void> openWhatsApp(String phone, String message) async {
     final clean = phone.replaceAll(RegExp(r'[^0-9]'), '');

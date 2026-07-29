@@ -5,11 +5,13 @@ import '../services/panic_service.dart';
 class WhatsAppSelector extends StatelessWidget {
   final List<String> contacts;
   final PanicService panicService;
+  final String messageTemplate;
 
   const WhatsAppSelector({
     super.key,
     required this.contacts,
     required this.panicService,
+    required this.messageTemplate,
   });
 
   Future<void> _sendWithLocation(BuildContext context, String contact) async {
@@ -17,7 +19,7 @@ class WhatsAppSelector extends StatelessWidget {
     if (position == null) return;
 
     final locationUrl = panicService.buildLocationUrl(position);
-    final message = panicService.buildEmergencyMessage(locationUrl);
+    final message = panicService.buildFinalMessage(messageTemplate, locationUrl);
     final phone = panicService.extractNumber(contact);
 
     if (context.mounted) {

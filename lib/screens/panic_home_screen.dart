@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import '../core/theme/app_theme.dart';
+import '../core/constants/app_constants.dart';
 import '../services/panic_service.dart';
 import '../widgets/sos_button.dart';
 import '../widgets/contact_manager_dialog.dart';
 import '../widgets/whatsapp_selector.dart';
+import '../widgets/message_editor_dialog.dart';
 
 class PanicHomeScreen extends StatefulWidget {
   const PanicHomeScreen({super.key});
@@ -18,6 +20,10 @@ class _PanicHomeScreenState extends State<PanicHomeScreen> {
   List<String> _contacts = [];
   bool _isSending = false;
   bool _isAlarmActive = false;
+  String _customMessage = '';
+
+  String get _effectiveMessage =>
+      _customMessage.isNotEmpty ? _customMessage : AppConstants.messageTemplates[0];
 
   @override
   void initState() {
@@ -28,7 +34,11 @@ class _PanicHomeScreenState extends State<PanicHomeScreen> {
   Future<void> _init() async {
     await _panicService.requestPermissions();
     final contacts = await _panicService.loadContacts();
-    setState(() => _contacts = contacts);
+    final msg = await _panicService.loadCustomMessage();
+    setState(() {
+      _contacts = contacts;
+      _customMessage = msg;
+    });
   }
 
   Future<void> _sendSmsAlert() async {
@@ -48,7 +58,7 @@ class _PanicHomeScreenState extends State<PanicHomeScreen> {
     }
 
     final locationUrl = _panicService.buildLocationUrl(position);
-    final message = _panicService.buildEmergencyMessage(locationUrl);
+    final message = _panicService.buildFinalMessage(_effectiveMessage, locationUrl);
 
     int sent = 0;
     for (final item in _contacts) {
@@ -99,6 +109,7 @@ class _PanicHomeScreenState extends State<PanicHomeScreen> {
       builder: (_) => WhatsAppSelector(
         contacts: _contacts,
         panicService: _panicService,
+        messageTemplate: _effectiveMessage,
       ),
     );
   }
@@ -108,7 +119,7 @@ class _PanicHomeScreenState extends State<PanicHomeScreen> {
     if (position == null) return;
 
     final locationUrl = _panicService.buildLocationUrl(position);
-    final message = _panicService.buildEmergencyMessage(locationUrl);
+    final message = _panicService.buildFinalMessage(_effectiveMessage, locationUrl);
     final phone = _panicService.extractNumber(contact);
 
     await _panicService.openWhatsApp(phone, message);
@@ -169,6 +180,22 @@ class _PanicHomeScreenState extends State<PanicHomeScreen> {
         onChanged: () async {
           final updated = await _panicService.loadContacts();
           setState(() => _contacts = updated);
+        },
+      ),
+    );
+  }
+
+  void _openMessageEditor() {
+    showDialog(
+      context: context,
+      builder: (_) => MessageEditorDialog(
+        panicService: _panicService,
+        currentMessage: _customMessage.isNotEmpty
+            ? _customMessage
+            : AppConstants.messageTemplates[0],
+        onSaved: () async {
+          final msg = await _panicService.loadCustomMessage();
+          setState(() => _customMessage = msg);
         },
       ),
     );
@@ -360,6 +387,32 @@ class _PanicHomeScreenState extends State<PanicHomeScreen> {
                             ),
                           ),
                         ],
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Edit message button
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.grey[400],
+                            side: const BorderSide(color: Colors.white12),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          onPressed: _openMessageEditor,
+                          icon: const Icon(Icons.edit_note, size: 20),
+                          label: const Text(
+                            "PERSONALIZAR MENSAJE DE ALERTA",
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
                       ),
                     ],
                   ),

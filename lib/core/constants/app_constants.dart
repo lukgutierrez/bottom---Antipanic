@@ -26,4 +26,16 @@ class AppConstants {
 
   // Argentine phone prefixes
   static const String argentinaCountryCode = '+549';
+
+  // Placeholder for location URL in messages
+  static const String locationPlaceholder = '{ubicacion}';
+
+  // Pre-defined emergency message templates
+  static const List<String> messageTemplates = [
+    '¡ALERTA DE EMERGENCIA! Necesito ayuda urgente. Mi ubicación actual: {ubicacion}',
+    '¡AYUDA! Estoy en peligro. Por favor ven a mi ubicación: {ubicacion}',
+    'EMERGENCIA. Necesito auxilio inmediato. Estoy aquí: {ubicacion}',
+    '¡URGENTE! Estoy en una situación de riesgo. Mi ubicación: {ubicacion}',
+    'Necesito ayuda por favor. Esta es mi ubicación exacta: {ubicacion}',
+  ];
 }

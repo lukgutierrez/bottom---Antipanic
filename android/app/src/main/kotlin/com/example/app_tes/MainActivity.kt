@@ -85,7 +85,7 @@ class MainActivity: FlutterActivity() {
                 }
             } 
             
-            // 4. GUARDADO NATIVO ULTRA SEGURO (Ahora guarda Nombre y Número)
+            // 4. GUARDADO NATIVO DE CONTACTOS
             else if (call.method == "guardarContactos") {
                 val lista = call.argument<List<String>>("contactos")
                 if (lista != null) {
@@ -98,7 +98,7 @@ class MainActivity: FlutterActivity() {
                 }
             }
 
-            // 5. CARGA NATIVA
+            // 5. CARGA DE CONTACTOS
             else if (call.method == "cargarContactos") {
                 val prefs = context.getSharedPreferences("panico_memoria", Context.MODE_PRIVATE)
                 val guardado = prefs.getString("mis_numeros", "") ?: ""
@@ -106,18 +106,35 @@ class MainActivity: FlutterActivity() {
                 result.success(lista)
             }
 
-            // 6. INICIAR SIRENA Y VIBRACIÓN (MEJORADO PARA QUE SUENE SÍ O SÍ)
+            // 6. GUARDAR MENSAJE PERSONALIZADO
+            else if (call.method == "guardarMensaje") {
+                val mensaje = call.argument<String>("mensaje")
+                if (mensaje != null) {
+                    val prefs = context.getSharedPreferences("panico_memoria", Context.MODE_PRIVATE)
+                    prefs.edit().putString("mensaje_personalizado", mensaje).apply()
+                    result.success(true)
+                } else {
+                    result.error("ERROR", "Mensaje nulo", null)
+                }
+            }
+
+            // 7. CARGAR MENSAJE PERSONALIZADO
+            else if (call.method == "cargarMensaje") {
+                val prefs = context.getSharedPreferences("panico_memoria", Context.MODE_PRIVATE)
+                val mensaje = prefs.getString("mensaje_personalizado", "") ?: ""
+                result.success(mensaje)
+            }
+
+            // 8. INICIAR SIRENA Y VIBRACIÓN
             else if (call.method == "iniciarAlarma") {
                 try {
                     val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
                     
-                    // Forzamos al máximo el volumen de Alarma y de Multimedia
                     val maxAlarm = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
                     val maxMusic = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                     audioManager.setStreamVolume(AudioManager.STREAM_ALARM, maxAlarm, 0)
                     audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxMusic, 0)
 
-                    // Buscamos el tono más fuerte disponible (Alarma -> Tono de llamada -> Notificación)
                     if (mediaPlayer == null) {
                         var alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
                         if (alarmUri == null) {
@@ -138,7 +155,6 @@ class MainActivity: FlutterActivity() {
                         mediaPlayer?.start()
                     }
 
-                    // Motor de vibración continuo estilo pánico
                     vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                         val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
                         vibratorManager.defaultVibrator
@@ -161,7 +177,7 @@ class MainActivity: FlutterActivity() {
                 }
             }
 
-            // 7. DETENER SIRENA Y VIBRACIÓN
+            // 9. DETENER SIRENA Y VIBRACIÓN
             else if (call.method == "detenerAlarma") {
                 try {
                     mediaPlayer?.apply {
